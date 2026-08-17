@@ -1,0 +1,316 @@
+:root {
+  --bg: #f6f7f9;
+  --card: #ffffff;
+  --border: #e5e7eb;
+  --text: #1c2330;
+  --muted: #6b7280;
+  --accent: #2563eb;
+  --danger: #dc2626;
+  --radius: 10px;
+}
+
+* { box-sizing: border-box; }
+
+/* The hidden attribute must always win, even on an element
+   to which an author rule gives a display (flex, grid…). */
+[hidden] { display: none !important; }
+
+body {
+  margin: 0;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+}
+
+header {
+  padding: 14px 20px;
+  background: var(--card);
+  border-bottom: 1px solid var(--border);
+}
+
+.brand {
+  font-weight: 700;
+  text-decoration: none;
+  color: var(--text);
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+main { max-width: 860px; margin: 0 auto; padding: 24px 16px 64px; }
+
+h1 { font-size: 1.5rem; }
+h2 { font-size: 1.1rem; }
+
+/* Connected home: stacked and centered cards */
+#account-section {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
+}
+.home-card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: min(640px, 100%);
+}
+.home-card h3 { margin: 0 0 4px; font-size: 1.05rem; }
+#server-projects { list-style: none; padding: 0; margin: 0; }
+
+input {
+  padding: 10px 12px;
+  border: 1px solid #d1d5db;
+  border-radius: 10px;
+  font-size: 1rem;
+  background: #fff;
+  transition: border-color .15s ease, box-shadow .15s ease;
+}
+input:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, .18);
+}
+
+button, .button {
+  padding: 10px 14px;
+  border: none;
+  border-radius: 10px;
+  background: var(--accent);
+  color: #fff;
+  font-size: 1rem;
+  cursor: pointer;
+  text-align: center;
+  transition: filter .12s ease, transform .06s ease;
+}
+button:disabled { opacity: .4; cursor: default; }
+button:hover:not(:disabled), .button:hover { filter: brightness(1.07); }
+button:active:not(:disabled) { transform: translateY(1px); }
+
+#create-status { color: var(--danger); min-height: 1.2em; margin: 4px 0 0; }
+
+.share-row { display: flex; gap: 8px; }
+.share-row input { flex: 1; }
+
+#dropzone {
+  border: 2px dashed #cbd5e1;
+  border-radius: var(--radius);
+  padding: 24px;
+  text-align: center;
+  color: var(--muted);
+  background: var(--card);
+  margin: 16px 0;
+}
+#dropzone.dragging { border-color: var(--accent); background: #eff6ff; }
+
+.picker-buttons {
+  display: flex;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+#upload-list, #file-list { list-style: none; padding: 0; }
+#upload-list li, #file-list li {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 10px 14px;
+  margin: 6px 0;
+}
+.upload-state { color: var(--muted); display: flex; gap: 8px; align-items: center; }
+.file-meta { color: var(--muted); font-size: .85rem; white-space: nowrap; }
+
+#gallery {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: 8px;
+  margin: 16px 0;
+}
+#gallery img {
+  width: 100%;
+  aspect-ratio: 1;
+  object-fit: cover;
+  border-radius: 6px;
+  cursor: pointer;
+  background: var(--border);
+}
+
+#empty-state { color: var(--muted); text-align: center; padding: 24px; }
+
+.thumb-cell {
+  position: relative;
+  aspect-ratio: 1;
+  border-radius: 6px;
+  background: var(--border);
+  overflow: hidden;
+  cursor: pointer;
+}
+.thumb-cell.video { background: #1c2330; }
+.thumb-cell img { height: 100%; }
+
+.play-badge {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+  font-size: 1.8rem;
+  text-shadow: 0 1px 8px rgba(0, 0, 0, .7);
+  pointer-events: none;
+}
+
+.file-check {
+  width: 20px;
+  height: 20px;
+  accent-color: var(--accent);
+  margin: 0;
+  flex-shrink: 0;
+}
+.thumb-cell .file-check {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+}
+
+.file-label { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.file-label a { overflow-wrap: anywhere; }
+
+button.secondary {
+  background: var(--card);
+  color: var(--accent);
+  border: 1px solid var(--accent);
+}
+
+#download-all { margin-top: 8px; }
+
+#selection-bar {
+  position: fixed;
+  bottom: 16px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 10px 14px;
+  box-shadow: 0 6px 24px rgba(0, 0, 0, .15);
+  max-width: calc(100vw - 24px);
+}
+#selection-bar[hidden] { display: none; }
+#selection-bar button { padding: 8px 12px; font-size: .95rem; }
+#selection-info { color: var(--muted); white-space: nowrap; }
+
+#not-found {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 24px;
+  text-align: center;
+}
+
+#lightbox {
+  position: fixed;
+  inset: 0;
+  background: rgba(10, 12, 16, .92);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+#lightbox[hidden] { display: none; }
+#lb-img, #lb-video { max-width: 92vw; max-height: 92vh; object-fit: contain; }
+#lb-img[hidden], #lb-video[hidden] { display: none; }
+#lb-close, #lb-prev, #lb-next {
+  position: fixed;
+  background: rgba(255, 255, 255, .12);
+  color: #fff;
+  font-size: 1.4rem;
+  border-radius: 50%;
+  width: 44px;
+  height: 44px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+#lb-close { top: 16px; right: 16px; }
+#lb-prev { left: 16px; top: 50%; transform: translateY(-50%); }
+#lb-next { right: 16px; top: 50%; transform: translateY(-50%); }
+
+/* Project list for logged-in account: name + date, buttons on the right.
+   If the card is too narrow, buttons (grouped side-by-side) move
+   to a second line to keep name readable; ellipsis remains
+   only as a safeguard for oversized names. */
+#server-projects li {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  padding: 6px 0;
+}
+#server-projects .project-name {
+  flex: 1 1 12rem;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+#server-projects .file-meta { flex-shrink: 0; }
+.project-actions {
+  display: flex;
+  gap: 0.5rem;
+  flex-shrink: 0;
+  margin-left: auto;
+}
+.project-actions button { white-space: nowrap; }
+
+/* Login screen (hero card). Selector requires #home-view to be
+   visible AND #login-hero unhidden: in project view, only the ancestor is
+   [hidden], so both levels must be checked. */
+body:has(#home-view:not([hidden]) #login-hero:not([hidden])) {
+  background: linear-gradient(180deg, #dbeafe 0%, #eff6ff 45%, var(--bg) 100%);
+  background-attachment: fixed;
+}
+#login-hero {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: calc(100vh - 180px);
+}
+/* display:flex would override display:none of the hidden attribute */
+#login-hero[hidden] { display: none; }
+.login-card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  box-shadow: 0 20px 50px rgba(37, 99, 235, .12);
+  padding: 36px 32px;
+  width: min(380px, 100%);
+  text-align: center;
+}
+.login-brand { font-size: 3rem; line-height: 1; }
+.login-card h1 { margin: 12px 0 24px; font-size: 1.35rem; }
+#login-form { display: flex; flex-direction: column; gap: 12px; }
+#login-form input { text-align: center; }
+#login-form button { width: 100%; margin-top: 4px; }
+#login-status { color: var(--danger); min-height: 1.2em; margin: 4px 0 0; }
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}

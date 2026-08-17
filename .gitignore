@@ -1,0 +1,49 @@
+# Deployment state & local configuration
+.bucket
+.lambda-url
+.env
+.env.*
+!.env.example
+
+# Node dependencies
+node_modules/
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# Temporary files & build artifacts
+*.tmp
+*.zip
+dist/
+build/
+out/
+.cache/
+.npm/
+docs/
+
+# Testing & coverage
+coverage/
+.nyc_output/
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# IDEs & Editors
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.project
+.settings/
+.classpath
