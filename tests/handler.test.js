@@ -99,6 +99,34 @@ test('sign: valid paths → 200, URLs under projects/<login>/<key>/', async () =
   assert.equal(urls['thumbs/1-chat.jpg.jpg'], `https://signed.example/projects/alice/${KEY}/thumbs/1-chat.jpg.jpg`);
 });
 
+test('sign: signs a normalized Content-Type and disposition, never the one supplied', async () => {
+  const signed = [];
+  const handle = createHandler(makeDeps({
+    presignPut: async (objectKey, type, size, disposition) => {
+      signed.push([type, disposition]);
+      return 'https://signed.example/';
+    },
+  }));
+  const res = await handle(post({
+    action: 'sign',
+    login: 'alice',
+    key: KEY,
+    objects: [
+      { path: 'files/1-x.html', type: 'text/html', size: 10 },
+      { path: 'files/2-x.svg', type: 'image/svg+xml', size: 10 },
+      { path: 'files/3-chat.jpg', type: 'image/jpeg', size: 10 },
+      { path: 'files/4-clip.mp4', type: 'video/mp4', size: 10 },
+    ],
+  }));
+  assert.equal(res.statusCode, 200);
+  assert.deepEqual(signed, [
+    ['application/octet-stream', 'attachment'],
+    ['application/octet-stream', 'attachment'],
+    ['image/jpeg', 'inline'],
+    ['video/mp4', 'inline'],
+  ]);
+});
+
 test('sign: invalid key → 400 without querying S3; invalid paths, empty or > 50 → 400', async () => {
   let headCalled = false;
   const handle = createHandler(makeDeps({

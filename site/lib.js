@@ -32,6 +32,39 @@ export function isValidLogin(login) {
   return typeof login === 'string' && /^[a-z0-9]{2,16}$/.test(login);
 }
 
+// Content-Type an upload may be stored with. Uploads are served from the same
+// origin as the site, so a type the browser renders as a document (text/html,
+// image/svg+xml…) would be stored XSS: only the media the gallery displays is
+// kept as-is, anything else becomes an opaque download. Shared with the Lambda,
+// which signs the *normalized* value — a client sending a different
+// Content-Type header just gets a 403 from S3.
+export const UPLOAD_TYPES = new Set([
+  'image/jpeg', 'image/png', 'image/gif', 'image/webp',
+  'image/heic', 'image/heif', 'image/avif',
+  'video/mp4', 'video/quicktime', 'video/x-m4v', 'video/webm',
+]);
+export const FALLBACK_UPLOAD_TYPE = 'application/octet-stream';
+
+export function safeContentType(type) {
+  if (typeof type !== 'string') return FALLBACK_UPLOAD_TYPE;
+  const normalized = type.split(';')[0].trim().toLowerCase();
+  return UPLOAD_TYPES.has(normalized) ? normalized : FALLBACK_UPLOAD_TYPE;
+}
+
+// The two headers S3 stores with an upload and replays on every GET. Both are
+// signed into the pre-signed PUT, so the uploader cannot pick them.
+// `inline` is safe for exactly the types above — a raster image or a video
+// cannot execute script, and image/svg+xml is deliberately absent from the
+// list — so photos and videos open normally when their URL is visited.
+// Anything else is octet-stream AND attachment: never a document on our origin.
+export function uploadHeaders(type) {
+  const contentType = safeContentType(type);
+  return {
+    contentType,
+    contentDisposition: contentType === FALLBACK_UPLOAD_TYPE ? 'attachment' : 'inline',
+  };
+}
+
 // Fragment of a share link: "<login>/<key>". Returns { login, key }
 // or null (legacy "key only" format included).
 export function parseProjectRef(fragment) {
