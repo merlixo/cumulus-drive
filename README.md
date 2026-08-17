@@ -11,14 +11,14 @@ node --test tests/lib.test.js tests/zip.test.js tests/handler.test.js   # Node â
 ## Deployment
 
 ```bash
-# 1. (one-time, new bucket only) create the bucket
+# 1. (one-time) create the bucket â€” no bucket policy yet, so it stays fully private
 ./scripts/infra.sh                    # writes the bucket name to .bucket
 
 # 2. Create an account (prompts for password; re-run = new password)
-./scripts/auth.sh create <login>      # provisions Lambda + policy, writes .lambda-url
+./scripts/auth.sh create <login>      # Lambda + bucket policy, writes .lambda-url
 
-# 3. (one-time) migrate v2 projects stored at the root
-./scripts/migrate.sh <login>          # legacy links will need to be re-shared
+# 3. (one-time, only for a bucket predating 16-char keys) shorten project keys
+./scripts/migrate.sh                  # migrated links will need to be re-shared
 
 # 4. Deploy the site
 ./scripts/deploy.sh                   # generates config.js, displays site URL
@@ -26,6 +26,12 @@ node --test tests/lib.test.js tests/zip.test.js tests/handler.test.js   # Node â
 
 Account management: `./scripts/auth.sh list`, `./scripts/auth.sh delete <login>`
 (revokes login and anonymous access, deletes all projects owned by the account).
+
+`auth.sh` is the sole owner of the bucket policy: it rebuilds it in full from the
+registry on every `create`/`delete`, granting public read on the site files and on
+`projects/<login>/*` only â€” never on the whole bucket, which would expose
+`auth/accounts.json`. Use `./scripts/auth.sh sync` to redeploy the Lambda and
+re-apply that policy without touching any password.
 
 ## Administration
 
