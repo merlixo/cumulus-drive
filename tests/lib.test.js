@@ -4,7 +4,7 @@ import {
   generateKey, KEY_ALPHABET, KEY_LENGTH, isValidKey, isValidSignPath,
   isValidLogin, parseProjectRef,
   buildShareLink, parseListXml, makeObjectName, displayName, thumbKeyFor,
-  isImage, isVideo, formatSize, encodeKeyPath,
+  isImage, isVideo, formatSize, encodeKeyPath, safeContentType, uploadHeaders,
 } from '../site/lib.js';
 
 test('generateKey: length = KEY_LENGTH, no arguments', () => {
@@ -90,6 +90,43 @@ test('parseListXml: extracts keys, sizes, dates (decoded XML entities)', () => {
     lastModified: '2026-08-06T10:00:00.000Z',
   });
   assert.equal(files[1].key, 'projects/k/files/456-doc.pdf');
+});
+
+test('safeContentType: renderable types are never echoed back', () => {
+  for (const dangerous of [
+    'text/html', 'TEXT/HTML', 'text/html; charset=utf-8', 'image/svg+xml',
+    'application/xhtml+xml', 'text/javascript', 'application/pdf', 'x', '',
+  ]) {
+    assert.equal(safeContentType(dangerous), 'application/octet-stream', dangerous);
+  }
+});
+
+test('safeContentType: gallery media kept, normalized lowercase', () => {
+  assert.equal(safeContentType('image/jpeg'), 'image/jpeg');
+  assert.equal(safeContentType('Image/PNG'), 'image/png');
+  assert.equal(safeContentType('video/mp4; codecs="avc1"'), 'video/mp4');
+  assert.equal(safeContentType('video/quicktime'), 'video/quicktime');
+});
+
+test('safeContentType: non-string falls back instead of throwing', () => {
+  for (const bad of [undefined, null, 42, {}, []]) {
+    assert.equal(safeContentType(bad), 'application/octet-stream');
+  }
+});
+
+test('uploadHeaders: gallery media inline so a click plays it', () => {
+  for (const type of ['image/jpeg', 'image/png', 'video/mp4', 'video/quicktime']) {
+    assert.deepEqual(uploadHeaders(type), { contentType: type, contentDisposition: 'inline' });
+  }
+});
+
+test('uploadHeaders: anything renderable as a document is attachment', () => {
+  for (const type of ['text/html', 'image/svg+xml', 'application/pdf', '', undefined]) {
+    assert.deepEqual(uploadHeaders(type), {
+      contentType: 'application/octet-stream',
+      contentDisposition: 'attachment',
+    }, String(type));
+  }
 });
 
 test('parseListXml: nextToken null when not truncated', () => {

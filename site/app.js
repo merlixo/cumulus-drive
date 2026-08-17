@@ -1,7 +1,7 @@
 import {
   buildShareLink, parseListXml, parseProjectRef, makeObjectName,
   displayName, thumbKeyFor, isImage, isVideo, formatSize, encodeKeyPath,
-  buildZip, dedupeNames,
+  buildZip, dedupeNames, safeContentType, uploadHeaders,
 } from './lib.js';
 
 const $ = (sel) => document.querySelector(sel);
@@ -295,6 +295,18 @@ dropzone.addEventListener('drop', (event) => {
   uploadFiles([...event.dataTransfer.files]);
 });
 
+// Headers signed into every pre-signed PUT (see presignPut in lambda/index.mjs):
+// they must be sent verbatim, otherwise S3 rejects the upload with a 403.
+// Same uploadHeaders() as the Lambda, so the values always agree.
+const putHeaders = (type) => {
+  const { contentType, contentDisposition } = uploadHeaders(type);
+  return {
+    'Content-Type': contentType,
+    'Content-Disposition': contentDisposition,
+    'If-None-Match': '*',
+  };
+};
+
 async function uploadFiles(files) {
   const ref = currentRef();
   if (!ref) return;
@@ -312,7 +324,9 @@ async function uploadOne(ref, file, row) {
   const objectName = makeObjectName(file.name, Date.now());
   const filePath = `files/${objectName}`;
   const thumbPath = `thumbs/${objectName}.jpg`;
-  const fileType = file.type || 'application/octet-stream';
+  // Normalized before being announced: file.type is empty for an extension the
+  // browser doesn't know, which the Lambda would reject as an invalid object.
+  const fileType = safeContentType(file.type);
   row.status('envoi…');
   try {
     // Generation failure (HEIC, undecodable codec…) → no thumbnail, gallery has a fallback.
@@ -326,14 +340,14 @@ async function uploadOne(ref, file, row) {
     if (!ok) throw new Error(data.error ?? `HTTP ${code}`);
     const res = await fetch(data.urls[filePath], {
       method: 'PUT',
-      headers: { 'Content-Type': fileType },
+      headers: putHeaders(fileType),
       body: file,
     });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     if (thumb) {
       await fetch(data.urls[thumbPath], {
         method: 'PUT',
-        headers: { 'Content-Type': 'image/jpeg' },
+        headers: putHeaders('image/jpeg'),
         body: thumb,
       }).catch(() => {});
     }
@@ -476,9 +490,11 @@ function backfillVideoThumb(key, img) {
             objects: [{ path: thumbPath, type: 'image/jpeg', size: blob.size }],
           });
           if (ok) {
+            // 412 if another visitor already backfilled it (If-None-Match): the
+            // thumbnail is displayed locally either way.
             await fetch(data.urls[thumbPath], {
               method: 'PUT',
-              headers: { 'Content-Type': 'image/jpeg' },
+              headers: putHeaders('image/jpeg'),
               body: blob,
             }).catch(() => {});
           }
@@ -608,6 +624,9 @@ function showLightboxImage() {
     img.removeAttribute('src');
     video.hidden = false;
     video.src = `/${encodeKeyPath(key)}`;
+    // Opening the lightbox is a user gesture, so playback is allowed; a refusal
+    // (unsupported codec, browser policy) just leaves the controls visible.
+    video.play().catch(() => {});
   } else {
     video.hidden = true;
     video.removeAttribute('src');

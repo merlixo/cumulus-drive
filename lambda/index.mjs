@@ -58,10 +58,18 @@ export const handler = createHandler({
     }));
   },
 
-  // Signed Content-Length: client must send exact size announced
-  // to Lambda, otherwise S3 rejects PUT (403) — quotas cannot
-  // be bypassed by under-declaring size.
-  presignPut(objectKey, contentType, contentLength) {
+  // Everything here is a *signed* header: the client must send each one
+  // verbatim or S3 rejects the PUT (403), so none of it can be tampered with.
+  //   ContentLength   — exact size announced to the Lambda, so storage quotas
+  //                     cannot be bypassed by under-declaring size.
+  //   ContentType     — normalized by the Lambda (uploadHeaders), so an upload
+  //                     can never be typed as a document on our own origin.
+  //   ContentDisposition — 'inline' for gallery media so a photo or video opens
+  //                     normally, 'attachment' for everything else; also
+  //                     decided by uploadHeaders, never by the client.
+  //   IfNoneMatch: '*' — an upload may create a key, never overwrite one, so
+  //                     an existing file's stored headers can't be rewritten.
+  presignPut(objectKey, contentType, contentLength, contentDisposition) {
     return getSignedUrl(
       s3,
       new PutObjectCommand({
@@ -69,6 +77,8 @@ export const handler = createHandler({
         Key: objectKey,
         ContentType: contentType,
         ContentLength: contentLength,
+        ContentDisposition: contentDisposition,
+        IfNoneMatch: '*',
       }),
       { expiresIn: URL_TTL_SECONDS },
     );

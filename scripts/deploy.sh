@@ -14,7 +14,18 @@ if [[ -z "$LAMBDA_URL" ]]; then
   exit 1
 fi
 
-aws s3 cp "$ROOT/site/index.html" "s3://$BUCKET/index.html" \
+WORK=$(mktemp -d)
+trap 'rm -rf "$WORK"' EXIT
+
+# The CSP connect-src must name the Function URL origin, which is only known at
+# deploy time: substituted here from .lambda-url (scheme + host, no path).
+LAMBDA_ORIGIN=$(printf %s "$LAMBDA_URL" | sed -E 's#^(https?://[^/]+).*#\1#')
+sed "s|__LAMBDA_ORIGIN__|$LAMBDA_ORIGIN|" "$ROOT/site/index.html" > "$WORK/index.html"
+if grep -q '__LAMBDA_ORIGIN__' "$WORK/index.html"; then
+  echo "Substitution CSP échouée — index.html non déployé." >&2
+  exit 1
+fi
+aws s3 cp "$WORK/index.html" "s3://$BUCKET/index.html" \
   --content-type "text/html; charset=utf-8" --cache-control "no-cache"
 aws s3 cp "$ROOT/site/style.css" "s3://$BUCKET/style.css" \
   --content-type "text/css; charset=utf-8" --cache-control "no-cache"
@@ -27,10 +38,8 @@ aws s3 cp "$ROOT/site/favicon.svg" "s3://$BUCKET/favicon.svg" \
 aws s3 cp "$ROOT/site/favicon.png" "s3://$BUCKET/favicon.png" \
   --content-type "image/png" --cache-control "max-age=86400"
 
-CONFIG_TMP=$(mktemp)
-trap 'rm -f "$CONFIG_TMP"' EXIT
-printf "window.CUMULUS_CONFIG = { lambdaUrl: '%s' };\n" "$LAMBDA_URL" > "$CONFIG_TMP"
-aws s3 cp "$CONFIG_TMP" "s3://$BUCKET/config.js" \
+printf "window.CUMULUS_CONFIG = { lambdaUrl: '%s' };\n" "$LAMBDA_URL" > "$WORK/config.js"
+aws s3 cp "$WORK/config.js" "s3://$BUCKET/config.js" \
   --content-type "text/javascript; charset=utf-8" --cache-control "no-cache"
 
 echo "Déployé : https://$BUCKET.s3.$REGION.amazonaws.com/index.html"

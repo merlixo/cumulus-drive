@@ -1,7 +1,9 @@
 // cumulus-auth Lambda logic, without AWS SDK: S3 accesses are
 // injected (deps), making it testable with node --test.
 import { createHash, timingSafeEqual } from 'node:crypto';
-import { generateKey, isValidKey, isValidLogin, isValidSignPath, KEY_LENGTH } from '../site/lib.js';
+import {
+  generateKey, isValidKey, isValidLogin, isValidSignPath, uploadHeaders, KEY_LENGTH,
+} from '../site/lib.js';
 
 const MAX_NAME_LENGTH = 200;
 const MAX_OBJECTS = 50;
@@ -109,9 +111,14 @@ async function sign({ login, key, objects }, deps) {
   if (bucketBytes + incoming > BUCKET_QUOTA_BYTES) {
     return json(413, { error: 'stockage saturé — contactez le propriétaire' });
   }
+  // uploadHeaders, never o.type as sent: the client chooses the file, never how
+  // S3 will serve it back on the site's own origin.
   const urls = {};
   for (const o of objects) {
-    urls[o.path] = await deps.presignPut(`projects/${login}/${key}/${o.path}`, o.type, o.size);
+    const { contentType, contentDisposition } = uploadHeaders(o.type);
+    urls[o.path] = await deps.presignPut(
+      `projects/${login}/${key}/${o.path}`, contentType, o.size, contentDisposition,
+    );
   }
   return json(200, { urls });
 }

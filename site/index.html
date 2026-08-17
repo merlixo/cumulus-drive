@@ -3,6 +3,22 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <!-- Defense in depth: no inline script/style anywhere in the site, so the
+       page needs no 'unsafe-inline'. __LAMBDA_ORIGIN__ is substituted with the
+       Function URL origin by deploy.sh (left as-is, it is an unknown source
+       expression that browsers ignore, so local preview degrades to 'self').
+       frame-ancestors is deliberately absent: it is ignored in a <meta> CSP,
+       and S3 cannot serve a custom response header. -->
+  <meta http-equiv="Content-Security-Policy" content="
+    default-src 'none';
+    script-src 'self';
+    style-src 'self';
+    img-src 'self' blob:;
+    media-src 'self' blob:;
+    connect-src 'self' __LAMBDA_ORIGIN__;
+    base-uri 'none';
+    form-action 'self';
+  ">
   <title>Cumulus</title>
   <link rel="icon" type="image/svg+xml" href="favicon.svg">
   <link rel="icon" type="image/png" sizes="180x180" href="favicon.png">
