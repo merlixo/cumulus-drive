@@ -5,7 +5,33 @@ import {
   isValidLogin, parseProjectRef,
   buildShareLink, parseListXml, makeObjectName, displayName, thumbKeyFor,
   isImage, isVideo, formatSize, encodeKeyPath, safeContentType, uploadHeaders,
+  formatDuration, isRetriableStatus, retryDelayMs, RETRY_DELAYS_MS,
 } from '../site/lib.js';
+
+test('formatDuration: seconds rounded up to 5, then minutes, then hours', () => {
+  assert.equal(formatDuration(2), '~5 s');
+  assert.equal(formatDuration(42), '~45 s');
+  assert.equal(formatDuration(61), '~2 min');
+  assert.equal(formatDuration(3600), '~1 h 00');
+  assert.equal(formatDuration(3900), '~1 h 05');
+});
+
+test('formatDuration: unknown estimate → empty string', () => {
+  assert.equal(formatDuration(Infinity), '');
+  assert.equal(formatDuration(NaN), '');
+  assert.equal(formatDuration(-1), '');
+});
+
+test('isRetriableStatus: network loss, timeout, throttling, 5xx', () => {
+  for (const s of [0, 408, 429, 500, 502, 503]) assert.ok(isRetriableStatus(s), `${s}`);
+  for (const s of [200, 400, 403, 404, 412, 413]) assert.ok(!isRetriableStatus(s), `${s}`);
+});
+
+test('retryDelayMs: increasing backoff, capped at the last delay', () => {
+  assert.equal(retryDelayMs(1), RETRY_DELAYS_MS[0]);
+  assert.ok(retryDelayMs(2) > retryDelayMs(1));
+  assert.equal(retryDelayMs(99), RETRY_DELAYS_MS.at(-1));
+});
 
 test('generateKey: length = KEY_LENGTH, no arguments', () => {
   assert.equal(generateKey().length, KEY_LENGTH);

@@ -2,6 +2,7 @@ import {
   buildShareLink, parseListXml, parseProjectRef, makeObjectName,
   displayName, thumbKeyFor, isImage, isVideo, formatSize, encodeKeyPath,
   buildZip, dedupeNames, safeContentType, uploadHeaders,
+  formatDuration, isRetriableStatus, retryDelayMs, RETRY_DELAYS_MS,
 } from './lib.js';
 
 const $ = (sel) => document.querySelector(sel);
@@ -177,7 +178,7 @@ function showNotFound() {
   $('#project-title').textContent = 'Projet introuvable';
 }
 
-let galleryKeys = []; // S3 keys of displayed images, in gallery order
+let galleryKeys = []; // S3 keys of displayed media, in gallery order
 
 async function refreshFiles(ref) {
   const files = [];
@@ -200,69 +201,82 @@ async function refreshFiles(ref) {
 function renderFiles(files) {
   const media = files.filter((f) => isImage(f.key) || isVideo(f.key));
   const others = files.filter((f) => !isImage(f.key) && !isVideo(f.key));
-  galleryKeys = media.map((f) => f.key);
   filesByKey = new Map(files.map((f) => [f.key, f]));
-  selection.clear();
+  // Kept across refreshes: only files that disappeared leave the selection.
+  for (const key of selection) if (!filesByKey.has(key)) selection.delete(key);
   updateSelectionBar();
 
-  const gallery = $('#gallery');
-  gallery.replaceChildren();
-  media.forEach((f, index) => {
-    const video = isVideo(f.key);
-    const cell = document.createElement('div');
-    cell.className = video ? 'thumb-cell video' : 'thumb-cell';
-    const img = document.createElement('img');
-    img.src = `/${encodeKeyPath(thumbKeyFor(f.key))}`;
-    img.alt = displayName(f.key);
-    img.loading = 'lazy';
-    // No thumbnail: fallback to original for an image (e.g. HEIC);
-    // dark tile with badge for a video (an <img> cannot display an mp4).
-    img.addEventListener('error', () => {
-      if (video) {
-        img.hidden = true;
-        backfillVideoThumb(f.key, img);
-      } else {
-        img.src = `/${encodeKeyPath(f.key)}`;
-      }
-    }, { once: true });
-    cell.append(img);
-    if (video) {
-      const badge = document.createElement('span');
-      badge.className = 'play-badge';
-      badge.textContent = '▶';
-      cell.append(badge);
-    }
-    cell.append(makeCheckbox(f.key));
-    cell.addEventListener('click', (event) => {
-      if (event.target.classList.contains('file-check')) return;
-      openLightbox(index);
-    });
-    gallery.append(cell);
-  });
+  // Tiles still uploading to this project stay at the end of the gallery.
+  const ref = currentRef();
+  const pending = uploads.filter((u) => u.media && u.state !== 'done' && sameRef(u.ref, ref));
+  $('#gallery').replaceChildren(...media.map((f) => makeMediaCell(f)), ...pending.map((u) => u.view.el));
+  syncGalleryKeys();
+  $('#file-list').replaceChildren(...others.map(makeFileRow));
+  updateProjectSummary();
+}
 
-  const list = $('#file-list');
-  list.replaceChildren();
-  for (const f of others) {
-    const a = document.createElement('a');
-    a.href = `/${encodeKeyPath(f.key)}`;
-    a.textContent = displayName(f.key);
-    a.setAttribute('download', displayName(f.key));
-    const meta = document.createElement('span');
-    meta.className = 'file-meta';
-    meta.textContent = `${formatSize(f.size)} · ${new Date(f.lastModified).toLocaleDateString('fr-FR')}`;
-    const label = document.createElement('span');
-    label.className = 'file-label';
-    label.append(makeCheckbox(f.key), a);
-    const li = document.createElement('li');
-    li.append(label, meta);
-    list.append(li);
-  }
+function syncGalleryKeys() {
+  galleryKeys = [...$('#gallery').children].map((cell) => cell.dataset.key).filter(Boolean);
+}
 
-  $('#empty-state').hidden = files.length > 0;
-  const totalSize = files.reduce((n, f) => n + f.size, 0);
+function updateProjectSummary() {
+  $('#empty-state').hidden = filesByKey.size > 0 || uploads.length > 0;
+  const totalSize = [...filesByKey.values()].reduce((n, f) => n + f.size, 0);
   const allBtn = $('#download-all');
-  allBtn.hidden = files.length === 0;
+  allBtn.hidden = filesByKey.size === 0;
   allBtn.textContent = `Tout télécharger (${formatSize(totalSize)})`;
+}
+
+// previewUrl: local thumbnail of a file just uploaded, so it does not flash
+// while its S3 thumbnail is downloaded.
+function makeMediaCell(f, previewUrl = null) {
+  const video = isVideo(f.key);
+  const cell = document.createElement('div');
+  cell.className = video ? 'thumb-cell video' : 'thumb-cell';
+  cell.dataset.key = f.key;
+  const img = document.createElement('img');
+  img.alt = displayName(f.key);
+  img.loading = 'lazy';
+  // No thumbnail: fallback to original for an image (e.g. HEIC);
+  // dark tile with badge for a video (an <img> cannot display an mp4).
+  img.addEventListener('error', () => {
+    if (video) {
+      img.hidden = true;
+      backfillVideoThumb(f.key, img);
+    } else {
+      img.src = `/${encodeKeyPath(f.key)}`;
+    }
+  }, { once: true });
+  img.src = previewUrl ?? `/${encodeKeyPath(thumbKeyFor(f.key))}`;
+  cell.append(img);
+  if (video) {
+    const badge = document.createElement('span');
+    badge.className = 'play-badge';
+    badge.textContent = '▶';
+    cell.append(badge);
+  }
+  cell.append(makeCheckbox(f.key));
+  cell.addEventListener('click', (event) => {
+    if (event.target.classList.contains('file-check')) return;
+    openLightbox(galleryKeys.indexOf(f.key));
+  });
+  return cell;
+}
+
+function makeFileRow(f) {
+  const a = document.createElement('a');
+  a.href = `/${encodeKeyPath(f.key)}`;
+  a.textContent = displayName(f.key);
+  a.setAttribute('download', displayName(f.key));
+  const meta = document.createElement('span');
+  meta.className = 'file-meta';
+  meta.textContent = `${formatSize(f.size)} · ${new Date(f.lastModified).toLocaleDateString('fr-FR')}`;
+  const label = document.createElement('span');
+  label.className = 'file-label';
+  label.append(makeCheckbox(f.key), a);
+  const li = document.createElement('li');
+  li.append(label, meta);
+  return li;
 }
 
 function makeCheckbox(key) {
@@ -274,7 +288,15 @@ function makeCheckbox(key) {
   return cb;
 }
 
+// ---------- upload queue ----------
+
 const MAX_UPLOAD_BYTES = 5 * 1024 ** 3; // single S3 PUT limit
+const UPLOAD_CONCURRENCY = 3;
+const SIGN_BATCH = 25; // file + thumbnail each: 50 objects, the Lambda's MAX_OBJECTS
+const PREP_AHEAD = 8; // thumbnails made ahead of uploads, so one sign covers several files
+const MAX_ATTEMPTS = 1 + RETRY_DELAYS_MS.length;
+const URL_MAX_AGE_MS = 50 * 60 * 1000; // pre-signed URLs expire after 1 h (URL_TTL_SECONDS)
+const STALL_MS = 60_000; // no upload progress for this long → aborted and retried
 
 for (const inputId of ['#photo-input', '#file-input']) {
   $(inputId).addEventListener('change', (event) => {
@@ -307,90 +329,483 @@ const putHeaders = (type) => {
   };
 };
 
-async function uploadFiles(files) {
-  const ref = currentRef();
-  if (!ref) return;
-  for (const file of files) {
-    await uploadOne(ref, file, addUploadRow(file.name));
+class UploadError extends Error {
+  constructor(message, { retriable = false, resign = false, rename = false } = {}) {
+    super(message);
+    Object.assign(this, { retriable, resign, rename });
   }
-  await refreshFiles(ref);
 }
 
-async function uploadOne(ref, file, row) {
-  if (file.size > MAX_UPLOAD_BYTES) {
-    row.fail('fichier > 5 Go');
-    return;
+// state: queued → uploading → done, or → waiting (automatic retry) / failed (manual retry).
+const uploads = [];
+let activeUploads = 0;
+let lastStamp = 0;
+let prepChain = Promise.resolve();
+
+const sameRef = (a, b) => Boolean(a && b) && a.login === b.login && a.key === b.key;
+const isPending = (u) => u.state === 'queued' || u.state === 'uploading' || u.state === 'waiting';
+
+// Strictly increasing per tab: parallel uploads of same-named files (iOS
+// often names every pick "image.jpg") never collide on the same object key.
+function uniqueStamp() {
+  lastStamp = Math.max(Date.now(), lastStamp + 1);
+  return lastStamp;
+}
+
+function uploadFiles(files) {
+  const ref = currentRef();
+  if (!ref || files.length === 0) return;
+  // New batch after the previous one settled: its successes leave the counters.
+  if (!uploads.some(isPending)) {
+    for (let i = uploads.length - 1; i >= 0; i -= 1) if (uploads[i].state === 'done') uploads.splice(i, 1);
+    resetUploadRate();
   }
-  const objectName = makeObjectName(file.name, Date.now());
-  const filePath = `files/${objectName}`;
-  const thumbPath = `thumbs/${objectName}.jpg`;
-  // Normalized before being announced: file.type is empty for an extension the
-  // browser doesn't know, which the Lambda would reject as an invalid object.
-  const fileType = safeContentType(file.type);
-  row.status('envoi…');
+  for (const file of files) enqueueUpload(ref, file);
+  updateProjectSummary();
+  pumpUploads();
+}
+
+function enqueueUpload(ref, file) {
+  const item = {
+    ref,
+    file,
+    media: isImage(file.name) || isVideo(file.name),
+    fileType: safeContentType(file.type), // empty type → octet-stream, never rejected by the Lambda
+    state: 'queued',
+    attempts: 0,
+    loaded: 0,
+    error: '',
+    thumb: null,
+    previewUrl: null,
+    prep: null,
+    prepared: false,
+    urls: null,
+    signedAt: 0,
+    signing: null,
+  };
+  nameUpload(item);
+  item.view = item.media ? makePendingCell(item) : makePendingRow(item);
+  if (item.media) $('#gallery').append(item.view.el);
+  else $('#upload-list').append(item.view.el);
+  uploads.push(item);
+  if (file.size > MAX_UPLOAD_BYTES) failUpload(item, 'fichier > 5 Go');
+  else if (file.size === 0) failUpload(item, 'fichier vide'); // would make the Lambda reject the whole batch
+  item.view.render();
+}
+
+function nameUpload(item) {
+  const objectName = makeObjectName(item.file.name, uniqueStamp());
+  item.filePath = `files/${objectName}`;
+  item.thumbPath = `thumbs/${objectName}.jpg`;
+  item.urls = null;
+}
+
+function failUpload(item, message) {
+  item.state = 'failed';
+  item.error = message;
+}
+
+function pumpUploads() {
+  for (const item of uploads) {
+    if (activeUploads >= UPLOAD_CONCURRENCY || pauseTimer) break;
+    if (item.state === 'queued') runUpload(item);
+  }
+  uploads.filter((u) => u.state === 'queued').slice(0, PREP_AHEAD).forEach(prepareUpload);
+  scheduleUploadPanel();
+  updateWakeLock();
+}
+
+async function runUpload(item) {
+  activeUploads += 1;
+  item.state = 'uploading';
+  item.attempts += 1;
+  item.loaded = 0;
+  item.view.render();
   try {
-    // Generation failure (HEIC, undecodable codec…) → no thumbnail, gallery has a fallback.
-    const thumb = isImage(file.name) ? await makeThumbnail(file).catch(() => null)
-      : isVideo(file.name) ? await makeVideoThumbnail(file).catch(() => null)
-        : null;
-    const objects = [{ path: filePath, type: fileType, size: file.size }];
-    if (thumb) objects.push({ path: thumbPath, type: 'image/jpeg', size: thumb.size });
-    const { status: code, ok, data } = await callAuthLambda({ action: 'sign', login: ref.login, key: ref.key, objects });
-    if (code === 403) throw new Error('projet introuvable');
-    if (!ok) throw new Error(data.error ?? `HTTP ${code}`);
-    const res = await fetch(data.urls[filePath], {
-      method: 'PUT',
-      headers: putHeaders(fileType),
-      body: file,
-    });
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    if (thumb) {
-      await fetch(data.urls[thumbPath], {
+    await prepareUpload(item);
+    await ensureSigned(item);
+    await putFile(item);
+    if (item.thumb) {
+      // Thumbnail failure is harmless: the gallery falls back to the original.
+      await fetch(item.urls[item.thumbPath], {
         method: 'PUT',
         headers: putHeaders('image/jpeg'),
-        body: thumb,
+        body: item.thumb,
       }).catch(() => {});
     }
-    row.ok();
+    completeUpload(item);
   } catch (err) {
-    row.fail(err.message, () => uploadOne(ref, file, row).then(() => refreshFiles(ref)));
+    handleUploadError(item, err instanceof UploadError ? err : new UploadError(err.message));
+  } finally {
+    activeUploads -= 1;
+    pumpUploads();
   }
 }
 
-function addUploadRow(name) {
+function handleUploadError(item, err) {
+  item.loaded = 0;
+  item.error = err.message;
+  if (err.resign) item.urls = null;
+  if (err.rename) nameUpload(item);
+  if (err.retriable && (document.hidden || !navigator.onLine)) {
+    // Phone locked, app switched or network lost: not the file's fault, the
+    // attempt is given back and the upload resumes on return (resumeUploads).
+    item.attempts -= 1;
+    item.state = 'waiting';
+    pauseUploads();
+  } else if (err.retriable && item.attempts < MAX_ATTEMPTS) {
+    item.state = 'waiting';
+    pauseUploads();
+  } else {
+    item.state = 'failed';
+  }
+  item.view.render();
+}
+
+function requeueUpload(item) {
+  if (item.state !== 'waiting' && item.state !== 'failed') return;
+  item.state = 'queued';
+  item.view.render();
+  pumpUploads();
+}
+
+// Empty or oversized files fail for good: they can only be dismissed.
+const canRetry = (u) => u.state === 'failed' && u.file.size > 0 && u.file.size <= MAX_UPLOAD_BYTES;
+
+function retryUpload(item) {
+  if (!canRetry(item)) return;
+  item.attempts = 0;
+  requeueUpload(item);
+  if (pauseTimer) resumeUploads(); // a tap means "try now"
+}
+
+function dismissUpload(item) {
+  if (item.state !== 'failed') return;
+  uploads.splice(uploads.indexOf(item), 1);
+  item.view.el.remove();
+  scheduleUploadPanel();
+  updateProjectSummary();
+}
+
+// A network failure pauses the whole queue, not just the failed file:
+// otherwise every queued file would start, fail at once and burn its attempts
+// during the same outage. Delay grows with consecutive failures.
+let pauseTimer = 0;
+let failureStreak = 0; // reset by any successful upload
+
+function pauseUploads() {
+  if (pauseTimer) return;
+  failureStreak += 1;
+  pauseTimer = setTimeout(resumeUploads, retryDelayMs(failureStreak));
+  scheduleUploadPanel();
+}
+
+function resumeUploads() {
+  clearTimeout(pauseTimer);
+  pauseTimer = 0;
+  uploads.filter((u) => u.state === 'waiting').forEach(requeueUpload);
+  pumpUploads();
+}
+
+document.addEventListener('visibilitychange', () => {
+  if (!document.hidden) resumeUploads();
+});
+window.addEventListener('online', resumeUploads);
+window.addEventListener('beforeunload', (event) => {
+  if (uploads.some(isPending)) event.preventDefault();
+});
+$('#retry-all').addEventListener('click', () => uploads.forEach(retryUpload));
+
+// Thumbnails are made one at a time (memory: phone photos are 12–50 MP), in
+// queue order and ahead of the uploads. Never rejects: no thumbnail is fine.
+function prepareUpload(item) {
+  item.prep ??= prepChain = prepChain.then(async () => {
+    const { file } = item;
+    item.thumb = isImage(file.name) ? await makeThumbnail(file).catch(() => null)
+      : isVideo(file.name) ? await makeVideoThumbnail(file).catch(() => null)
+        : null;
+    if (item.thumb) {
+      item.previewUrl = URL.createObjectURL(item.thumb);
+      item.view.preview(item.previewUrl);
+    }
+    item.prepared = true;
+  });
+  return item.prep;
+}
+
+const urlsFresh = (u) => u.urls && Date.now() - u.signedAt < URL_MAX_AGE_MS;
+
+// One Lambda call signs this file and the next prepared ones of the queue.
+async function ensureSigned(item) {
+  if (urlsFresh(item)) return;
+  if (!item.signing) {
+    const batch = [item, ...uploads.filter((u) => u !== item && u.state === 'queued' && u.prepared
+      && !u.signing && !urlsFresh(u) && sameRef(u.ref, item.ref))].slice(0, SIGN_BATCH);
+    const signing = signBatch(item.ref, batch);
+    for (const u of batch) u.signing = signing;
+    signing.catch(() => {}); // the other batch members re-sign on their own turn
+  }
+  await item.signing;
+}
+
+async function signBatch(ref, batch) {
+  try {
+    const objects = [];
+    for (const u of batch) {
+      objects.push({ path: u.filePath, type: u.fileType, size: u.file.size });
+      if (u.thumb) objects.push({ path: u.thumbPath, type: 'image/jpeg', size: u.thumb.size });
+    }
+    let res;
+    try {
+      res = await callAuthLambda({ action: 'sign', login: ref.login, key: ref.key, objects });
+    } catch (err) {
+      // fetch() only throws a TypeError on network failure.
+      throw new UploadError(err instanceof TypeError ? 'connexion perdue' : err.message,
+        { retriable: err instanceof TypeError });
+    }
+    if (res.status === 403) throw new UploadError('projet introuvable');
+    if (!res.ok) {
+      throw new UploadError(res.data.error ?? `HTTP ${res.status}`, { retriable: isRetriableStatus(res.status) });
+    }
+    const signedAt = Date.now();
+    for (const u of batch) {
+      u.urls = res.data.urls;
+      u.signedAt = signedAt;
+    }
+  } finally {
+    for (const u of batch) u.signing = null;
+  }
+}
+
+// XMLHttpRequest rather than fetch(): only it reports upload progress.
+function putFile(item) {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    let stallTimer;
+    const watchStall = () => {
+      clearTimeout(stallTimer);
+      stallTimer = setTimeout(() => xhr.abort(), STALL_MS);
+    };
+    xhr.open('PUT', item.urls[item.filePath]);
+    for (const [name, value] of Object.entries(putHeaders(item.fileType))) xhr.setRequestHeader(name, value);
+    xhr.upload.addEventListener('progress', (event) => {
+      watchStall();
+      item.loaded = event.loaded;
+      item.view.render();
+      scheduleUploadPanel();
+    });
+    xhr.addEventListener('load', () => {
+      clearTimeout(stallTimer);
+      if (xhr.status >= 200 && xhr.status < 300) resolve();
+      // 412 = key already exists. Names are unique per tab, so on a retry it
+      // is this very file, stored by an attempt whose response was lost.
+      else if (xhr.status === 412 && item.attempts > 1) resolve();
+      else if (xhr.status === 412) reject(new UploadError('nom déjà pris', { retriable: true, rename: true }));
+      // 403 = expired or rejected signature: signed again on the next attempt.
+      else if (xhr.status === 403) reject(new UploadError('autorisation expirée', { retriable: true, resign: true }));
+      else reject(new UploadError(`HTTP ${xhr.status}`, { retriable: isRetriableStatus(xhr.status) }));
+    });
+    xhr.addEventListener('error', () => {
+      clearTimeout(stallTimer);
+      reject(new UploadError(navigator.onLine ? 'connexion perdue' : 'hors ligne', { retriable: true }));
+    });
+    xhr.addEventListener('abort', () => reject(new UploadError('envoi bloqué', { retriable: true })));
+    watchStall();
+    xhr.send(item.file);
+  });
+}
+
+function completeUpload(item) {
+  failureStreak = 0;
+  item.state = 'done';
+  item.loaded = item.file.size;
+  const { ref } = item;
+  if (!sameRef(ref, currentRef())) return; // another project is displayed
+  const f = {
+    key: `projects/${ref.login}/${ref.key}/${item.filePath}`,
+    size: item.file.size,
+    lastModified: new Date().toISOString(),
+  };
+  filesByKey.set(f.key, f);
+  if (item.media) {
+    item.view.el.replaceWith(makeMediaCell(f, item.previewUrl));
+    syncGalleryKeys();
+  } else {
+    item.view.el.remove();
+    $('#file-list').append(makeFileRow(f));
+  }
+  updateProjectSummary();
+}
+
+// ---------- upload views ----------
+
+const percent = (item) => Math.floor((100 * item.loaded) / item.file.size);
+
+// Gallery tile shown as soon as a photo is picked; becomes a regular tile
+// (makeMediaCell) once uploaded. A failed tile retries on tap.
+function makePendingCell(item) {
+  const cell = document.createElement('div');
+  cell.className = 'thumb-cell pending';
+  const img = document.createElement('img');
+  img.alt = item.file.name;
+  img.hidden = true;
+  const name = document.createElement('span');
+  name.className = 'pending-name';
+  name.textContent = item.file.name;
+  const label = document.createElement('span');
+  label.className = 'pending-label';
+  const bar = document.createElement('div');
+  bar.className = 'progress';
+  const fill = document.createElement('span');
+  bar.append(fill);
+  cell.append(img, name, label, bar);
+  cell.addEventListener('click', () => (canRetry(item) ? retryUpload(item) : dismissUpload(item)));
+  return {
+    el: cell,
+    preview(url) {
+      img.src = url;
+      img.hidden = false;
+      name.hidden = true;
+    },
+    render() {
+      cell.classList.toggle('failed', item.state === 'failed');
+      fill.style.width = `${item.state === 'uploading' ? percent(item) : 0}%`;
+      bar.hidden = item.state !== 'uploading';
+      label.textContent = {
+        queued: 'en attente',
+        uploading: `${percent(item)} %`,
+        waiting: '↻ nouvel essai…',
+        failed: `⚠ ${item.error}\nToucher pour ${canRetry(item) ? 'réessayer' : 'retirer'}`,
+      }[item.state] ?? '';
+    },
+  };
+}
+
+// Row for a non-media file, in #upload-list until uploaded.
+function makePendingRow(item) {
   const li = document.createElement('li');
   const label = document.createElement('span');
-  label.textContent = name;
+  label.className = 'pending-row-name';
+  label.textContent = item.file.name;
   const state = document.createElement('span');
   state.className = 'upload-state';
-  li.append(label, state);
-  $('#upload-list').append(li);
+  const bar = document.createElement('div');
+  bar.className = 'progress';
+  const fill = document.createElement('span');
+  bar.append(fill);
+  li.append(label, state, bar);
   return {
-    status(text) {
+    el: li,
+    preview() {},
+    render() {
+      fill.style.width = `${item.state === 'uploading' ? percent(item) : 0}%`;
+      bar.hidden = item.state !== 'uploading';
       state.replaceChildren();
-      state.textContent = text;
-    },
-    ok() {
-      state.replaceChildren();
-      state.textContent = '✓';
-      setTimeout(() => li.remove(), 3000);
-    },
-    fail(message, retry) {
-      state.replaceChildren();
-      state.textContent = `échec (${message}) `;
-      if (retry) {
+      state.textContent = {
+        queued: 'en attente',
+        uploading: `${percent(item)} %`,
+        waiting: 'nouvel essai…',
+        failed: `échec (${item.error}) `,
+      }[item.state] ?? '';
+      if (item.state === 'failed') {
+        const retry = canRetry(item);
         const btn = document.createElement('button');
         btn.type = 'button';
-        btn.textContent = 'réessayer';
-        btn.addEventListener('click', retry, { once: true });
+        btn.textContent = retry ? 'réessayer' : 'retirer';
+        btn.addEventListener('click', () => (retry ? retryUpload(item) : dismissUpload(item)), { once: true });
         state.append(btn);
       }
     },
   };
 }
 
+// ---------- upload panel ----------
+
+let panelFrame = 0;
+let rateStart = null; // { time, bytes } when the current run of uploads started
+let panelHideTimer = 0;
+
+function resetUploadRate() {
+  rateStart = null;
+}
+
+function scheduleUploadPanel() {
+  if (!panelFrame) panelFrame = requestAnimationFrame(updateUploadPanel);
+}
+
+function updateUploadPanel() {
+  panelFrame = 0;
+  clearTimeout(panelHideTimer);
+  const panel = $('#upload-panel');
+  if (uploads.length === 0) {
+    panel.hidden = true;
+    return;
+  }
+  panel.hidden = false;
+  const count = (state) => uploads.filter((u) => u.state === state).length;
+  const done = count('done');
+  const failed = count('failed');
+  const pending = uploads.filter(isPending).length;
+  const totalBytes = uploads.reduce((n, u) => n + u.file.size, 0);
+  const sentBytes = uploads.reduce((n, u) => n + (u.state === 'done' ? u.file.size : u.loaded), 0);
+  $('#upload-progress').style.width = `${totalBytes ? (100 * sentBytes) / totalBytes : 0}%`;
+  $('#retry-all').hidden = pending > 0 || !uploads.some(canRetry);
+  $('#upload-hint').hidden = pending === 0;
+  const plural = (n, words) => `${n} ${words.split(' ').map((w) => (n > 1 ? `${w}s` : w)).join(' ')}`;
+  let text;
+  if (pending > 0) {
+    const now = Date.now();
+    rateStart ??= { time: now, bytes: sentBytes };
+    const elapsed = (now - rateStart.time) / 1000;
+    const rate = (sentBytes - rateStart.bytes) / elapsed;
+    const eta = elapsed > 3 && rate > 0 ? formatDuration((totalBytes - sentBytes) / rate) : '';
+    text = `Envoi ${done}/${uploads.length} · ${formatSize(sentBytes)} / ${formatSize(totalBytes)}`;
+    if (!navigator.onLine) text += ' · en attente de connexion';
+    else if (pauseTimer) text += ' · connexion perdue, nouvel essai…';
+    else if (eta) text += ` · ${eta}`;
+    if (failed > 0) text += ` · ${plural(failed, 'échec')}`;
+  } else if (failed > 0) {
+    resetUploadRate();
+    text = done > 0 ? `${plural(done, 'fichier envoyé')} · ${plural(failed, 'échec')}` : plural(failed, 'échec');
+  } else {
+    resetUploadRate();
+    text = `✓ ${plural(done, 'fichier envoyé')}`;
+    panelHideTimer = setTimeout(() => {
+      if (uploads.some((u) => u.state !== 'done')) return;
+      uploads.length = 0;
+      updateUploadPanel();
+      updateProjectSummary();
+    }, 4000);
+  }
+  $('#upload-summary').textContent = text;
+}
+
+// Keeps the screen on while uploading: a locked phone suspends the page,
+// which kills every upload in flight. Released by the browser when hidden.
+let wakeLock = null; // WakeLockSentinel, or the request in flight
+
+function updateWakeLock() {
+  const busy = uploads.some(isPending);
+  if (busy && !wakeLock && !document.hidden && navigator.wakeLock) {
+    wakeLock = navigator.wakeLock.request('screen')
+      .then((sentinel) => {
+        sentinel.addEventListener('release', () => { wakeLock = null; });
+        if (!uploads.some(isPending)) sentinel.release();
+        return sentinel;
+      })
+      .catch(() => { wakeLock = null; });
+  } else if (!busy && wakeLock) {
+    Promise.resolve(wakeLock).then((sentinel) => sentinel?.release());
+    wakeLock = null;
+  }
+}
+
 async function makeThumbnail(file, maxDim = 400) {
-  const bitmap = await createImageBitmap(file);
+  // Decoded straight at thumbnail height: much faster and lighter than a full
+  // 12–50 MP decode on a phone. Browsers ignoring the option decode in full,
+  // and the canvas below scales either way.
+  const bitmap = await createImageBitmap(file, { resizeHeight: maxDim, resizeQuality: 'medium' })
+    .catch(() => createImageBitmap(file));
   const scale = Math.min(1, maxDim / Math.max(bitmap.width, bitmap.height));
   const canvas = document.createElement('canvas');
   canvas.width = Math.max(1, Math.round(bitmap.width * scale));

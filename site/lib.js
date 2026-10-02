@@ -143,6 +143,27 @@ export function formatSize(bytes) {
   return `${value < 10 ? value.toFixed(1) : Math.round(value)} ${units[i]}`;
 }
 
+// Remaining-time estimate for the upload panel: "~45 s", "~3 min", "~1 h 05".
+export function formatDuration(seconds) {
+  if (!Number.isFinite(seconds) || seconds < 0) return '';
+  if (seconds < 60) return `~${Math.max(5, Math.ceil(seconds / 5) * 5)} s`;
+  const minutes = Math.ceil(seconds / 60);
+  if (minutes < 60) return `~${minutes} min`;
+  return `~${Math.floor(minutes / 60)} h ${String(minutes % 60).padStart(2, '0')}`;
+}
+
+// Upload errors worth retrying on their own: network loss (0), timeouts,
+// throttling and server-side failures. Anything else (403, 413…) is final.
+export function isRetriableStatus(status) {
+  return status === 0 || status === 408 || status === 429 || status >= 500;
+}
+
+// Backoff before automatic retry n (1-based).
+export const RETRY_DELAYS_MS = [2000, 5000, 15000, 30000, 60000]; // ~2 min of outage covered
+export function retryDelayMs(attempt) {
+  return RETRY_DELAYS_MS[Math.min(attempt, RETRY_DELAYS_MS.length) - 1];
+}
+
 export function encodeKeyPath(key) {
   return key.split('/').map(encodeURIComponent).join('/');
 }

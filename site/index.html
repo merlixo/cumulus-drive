@@ -88,6 +88,14 @@
           <input id="photo-input" type="file" accept="image/*,video/*" multiple hidden>
           <input id="file-input" type="file" multiple hidden>
         </div>
+        <div id="upload-panel" hidden>
+          <div class="upload-panel-row">
+            <span id="upload-summary" role="status"></span>
+            <button id="retry-all" type="button" class="secondary" hidden>Tout réessayer</button>
+          </div>
+          <div class="progress"><span id="upload-progress"></span></div>
+          <p id="upload-hint">Gardez cette page ouverte jusqu'à la fin de l'envoi.</p>
+        </div>
         <ul id="upload-list"></ul>
         <div id="gallery"></div>
         <ul id="file-list"></ul>

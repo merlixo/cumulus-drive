@@ -128,6 +128,74 @@ button:active:not(:disabled) { transform: translateY(1px); }
   margin: 6px 0;
 }
 .upload-state { color: var(--muted); display: flex; gap: 8px; align-items: center; }
+#upload-list li { flex-wrap: wrap; }
+.pending-row-name { overflow-wrap: anywhere; min-width: 0; }
+#upload-list .progress { flex-basis: 100%; }
+
+/* Progress bar: fill width set from app.js (CSSOM, allowed by the CSP). */
+.progress {
+  height: 4px;
+  border-radius: 2px;
+  background: var(--border);
+  overflow: hidden;
+}
+.progress > span {
+  display: block;
+  height: 100%;
+  width: 0;
+  background: var(--accent);
+  transition: width .2s ease;
+}
+
+/* Sticky so progress stays visible while scrolling the gallery. */
+#upload-panel {
+  position: sticky;
+  top: 8px;
+  z-index: 2;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, .08);
+  padding: 10px 14px;
+  margin: 12px 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.upload-panel-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+#upload-summary { font-variant-numeric: tabular-nums; }
+#retry-all { padding: 6px 12px; font-size: .9rem; }
+#upload-hint { margin: 0; color: var(--muted); font-size: .85rem; }
+
+/* Tile of a photo being uploaded: local preview, dimmed until done. */
+.thumb-cell.pending { cursor: default; }
+.thumb-cell.pending img { opacity: .55; }
+.thumb-cell.pending .progress {
+  position: absolute;
+  left: 8px;
+  right: 8px;
+  bottom: 8px;
+  background: rgba(255, 255, 255, .6);
+}
+.pending-name, .pending-label {
+  position: absolute;
+  left: 6px;
+  right: 6px;
+  text-align: center;
+  font-size: .8rem;
+  overflow-wrap: anywhere;
+}
+.pending-name { top: 8px; color: var(--muted); }
+.pending-label {
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--text);
+  font-weight: 600;
+  white-space: pre-line;
+  text-shadow: 0 0 4px rgba(255, 255, 255, .9);
+}
+.thumb-cell.pending.failed { cursor: pointer; outline: 2px solid var(--danger); outline-offset: -2px; }
+.thumb-cell.pending.failed .pending-label { color: var(--danger); font-weight: 500; }
 .file-meta { color: var(--muted); font-size: .85rem; white-space: nowrap; }
 
 #gallery {
