@@ -10,6 +10,7 @@ const MAX_OBJECTS = 50;
 const MAX_UPLOAD_BYTES = 5 * 1024 ** 3;        // single S3 PUT limit (like client-side)
 const PROJECT_QUOTA_BYTES = 10 * 1024 ** 3;    // safety limit: 10 GiB per project
 const BUCKET_QUOTA_BYTES = 100 * 1024 ** 3;    // safety limit: 100 GiB for entire bucket
+const BUCKET_USAGE_TTL_MS = 5 * 60 * 1000;     // bucket total re-measured at most every 5 min
 // Dummy hash compared when login is unknown: identical response
 // and timing, no account existence oracle.
 const DUMMY_HASH = createHash('sha256').update('cumulus-dummy').digest('hex');
@@ -44,7 +45,23 @@ async function accountMatches(login, password, deps) {
 //          presignPut(objectKey, contentType, contentLength),
 //          listObjectsUnder(prefix) → [{key, size}],
 //          getObjectText(objectKey), deleteObjects(objectKeys) }
-export function createHandler(deps) {
+// now: injectable clock (tests).
+export function createHandler(deps, { now = Date.now } = {}) {
+  // Bucket-wide usage, kept by a warm instance: listing every project on each
+  // sign made uploads slower as the bucket grew. Signed sizes are added on
+  // top, so the estimate only errs high; other instances' uploads are missed
+  // for at most the TTL — acceptable for a safety limit, not a billing one.
+  const bucketUsage = { bytes: 0, measuredAt: -Infinity };
+  async function bucketBytes() {
+    if (now() - bucketUsage.measuredAt > BUCKET_USAGE_TTL_MS) {
+      const objects = await deps.listObjectsUnder('projects/');
+      bucketUsage.bytes = objects.reduce((total, o) => total + o.size, 0);
+      bucketUsage.measuredAt = now();
+    }
+    return bucketUsage.bytes;
+  }
+  const signDeps = { ...deps, bucketBytes, addBucketBytes: (n) => { bucketUsage.bytes += n; } };
+
   return async function handle(event) {
     if (event?.requestContext?.http?.method !== 'POST') {
       return json(400, { error: 'méthode invalide' });
@@ -60,7 +77,7 @@ export function createHandler(deps) {
     }
     if (!isValidLogin(body?.login)) return json(400, { error: 'login invalide' });
     if (body.action === 'create') return create(body, deps);
-    if (body.action === 'sign') return sign(body, deps);
+    if (body.action === 'sign') return sign(body, signDeps);
     if (body.action === 'list') return list(body, deps);
     if (body.action === 'delete') return destroy(body, deps);
     return json(400, { error: 'action inconnue' });
@@ -94,17 +111,19 @@ async function sign({ login, key, objects }, deps) {
   if (!(await deps.headManifest(login, key))) {
     return json(403, { error: 'projet introuvable' });
   }
-  // Storage safety limits: existing storage is measured in one pass over projects/
-  // (project + bucket totals). Declared sizes are tamper-proof: they
-  // are signed in the URLs (Content-Length) and verified by S3.
+  // Storage safety limits: the project is measured exactly on every call (its
+  // own prefix only), the bucket total comes from the per-instance cache.
+  // Declared sizes are tamper-proof: they are signed in the URLs
+  // (Content-Length) and verified by S3.
   const incoming = objects.reduce((total, o) => total + o.size, 0);
   const projectPrefix = `projects/${login}/${key}/`;
-  let bucketBytes = 0;
-  let projectBytes = 0;
-  for (const existing of await deps.listObjectsUnder('projects/')) {
-    bucketBytes += existing.size;
-    if (existing.key.startsWith(projectPrefix)) projectBytes += existing.size;
-  }
+  const [projectObjects, bucketBytes] = await Promise.all([
+    deps.listObjectsUnder(projectPrefix),
+    deps.bucketBytes(),
+  ]);
+  const projectBytes = projectObjects
+    .filter((o) => o.key.startsWith(projectPrefix))
+    .reduce((total, o) => total + o.size, 0);
   if (projectBytes + incoming > PROJECT_QUOTA_BYTES) {
     return json(413, { error: 'quota du projet atteint (10 Go)' });
   }
@@ -113,13 +132,12 @@ async function sign({ login, key, objects }, deps) {
   }
   // uploadHeaders, never o.type as sent: the client chooses the file, never how
   // S3 will serve it back on the site's own origin.
-  const urls = {};
-  for (const o of objects) {
+  const signed = await Promise.all(objects.map((o) => {
     const { contentType, contentDisposition } = uploadHeaders(o.type);
-    urls[o.path] = await deps.presignPut(
-      `projects/${login}/${key}/${o.path}`, contentType, o.size, contentDisposition,
-    );
-  }
+    return deps.presignPut(`projects/${login}/${key}/${o.path}`, contentType, o.size, contentDisposition);
+  }));
+  const urls = Object.fromEntries(objects.map((o, i) => [o.path, signed[i]]));
+  deps.addBucketBytes(incoming);
   return json(200, { urls });
 }
 

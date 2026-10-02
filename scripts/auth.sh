@@ -16,6 +16,9 @@ BUCKET="${BUCKET:-$(cat "$ROOT/.bucket")}"
 REGION="${REGION:-eu-west-3}"
 export AWS_DEFAULT_REGION="$REGION"   # pin the region for all aws calls
 FUNCTION="cumulus-auth"
+# 512 MB: Lambda CPU scales with memory — cold starts and signing a batch of
+# uploads are several times faster than at 128 MB, for a negligible cost here.
+MEMORY_MB=512
 ROLE="cumulus-auth-role"
 SITE_ORIGIN="https://$BUCKET.s3.$REGION.amazonaws.com"
 REGISTRY="s3://$BUCKET/auth/accounts.json"
@@ -114,14 +117,14 @@ ensure_lambda() {
       --zip-file "fileb://$WORK/pkg/fn.zip" >/dev/null
     aws lambda wait function-updated --function-name "$FUNCTION"
     aws lambda update-function-configuration --function-name "$FUNCTION" \
-      --environment "$ENV_VARS" >/dev/null
+      --environment "$ENV_VARS" --memory-size "$MEMORY_MB" >/dev/null
     aws lambda wait function-updated --function-name "$FUNCTION"
   else
     # IAM propagation of the newly created role can take a few seconds.
     for attempt in $(seq 1 10); do
       if aws lambda create-function --function-name "$FUNCTION" \
         --runtime nodejs22.x --handler lambda/index.handler --role "$ROLE_ARN" \
-        --zip-file "fileb://$WORK/pkg/fn.zip" --timeout 10 --memory-size 128 \
+        --zip-file "fileb://$WORK/pkg/fn.zip" --timeout 10 --memory-size "$MEMORY_MB" \
         --environment "$ENV_VARS" >/dev/null 2>"$WORK/create-err"; then
         break
       fi

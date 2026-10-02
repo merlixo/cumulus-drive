@@ -288,3 +288,50 @@ test('sign: presignPut receives size (signed Content-Length)', async () => {
   assert.equal(res.statusCode, 200);
   assert.deepEqual(sizes, [2048, 512]);
 });
+
+test('sign: bucket total listed once per TTL, project measured on its own prefix every call', async () => {
+  const prefixes = [];
+  let clock = 0;
+  const handle = createHandler(makeDeps({
+    listObjectsUnder: async (prefix) => { prefixes.push(prefix); return []; },
+  }), { now: () => clock });
+  const sign = () => handle(post({
+    action: 'sign', login: 'alice', key: KEY, objects: [{ path: 'files/1-a.jpg', type: 'image/jpeg', size: 10 }],
+  }));
+  await sign();
+  await sign();
+  assert.deepEqual(prefixes.filter((p) => p === 'projects/'), ['projects/']);
+  assert.equal(prefixes.filter((p) => p === `projects/alice/${KEY}/`).length, 2);
+  clock = 5 * 60 * 1000 + 1;
+  await sign();
+  assert.equal(prefixes.filter((p) => p === 'projects/').length, 2);
+});
+
+test('sign: sizes signed since the last measurement count toward the bucket quota', async () => {
+  const GIB = 1024 ** 3;
+  const handle = createHandler(makeDeps({
+    listObjectsUnder: async (prefix) => (prefix === 'projects/'
+      ? [{ key: 'projects/bob/cccccccccccccccc/files/1-b.mp4', size: 96 * GIB }]
+      : []),
+  }), { now: () => 0 });
+  const sign = (k) => handle(post({
+    action: 'sign', login: 'alice', key: k, objects: [{ path: 'files/1-a.mp4', type: 'video/mp4', size: 3 * GIB }],
+  }));
+  assert.equal((await sign(KEY)).statusCode, 200);
+  const second = await sign('b'.repeat(16));
+  assert.equal(second.statusCode, 413);
+  assert.match(JSON.parse(second.body).error, /saturé/);
+});
+
+test('sign: unknown project never lists the bucket', async () => {
+  let listed = false;
+  const handle = createHandler(makeDeps({
+    headManifest: async () => false,
+    listObjectsUnder: async () => { listed = true; return []; },
+  }));
+  const res = await handle(post({
+    action: 'sign', login: 'alice', key: KEY, objects: [{ path: 'files/1-a.jpg', type: 'image/jpeg', size: 10 }],
+  }));
+  assert.equal(res.statusCode, 403);
+  assert.equal(listed, false);
+});
