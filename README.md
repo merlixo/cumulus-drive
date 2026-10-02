@@ -47,3 +47,14 @@ Recommended: set up an AWS Budgets alert on the account.
 ```bash
 python3 -m http.server 8080 --directory site
 ```
+
+## Dev Server (local code, real bucket and Lambda — no deploy)
+
+Serves `site/` and relays Lambda calls, reads and pre-signed uploads to the real
+bucket, so changes can be tested end to end (on a phone too) before `deploy.sh`.
+
+```bash
+node scripts/dev-server.mjs                     # http://localhost:8080/index.html#<login>/<key>
+THROTTLE_KBPS=8000 node scripts/dev-server.mjs  # simulate a slow uplink (8 Mbit/s)
+adb reverse tcp:8080 tcp:8080                   # Android phone over USB: same URL on the phone
+```
