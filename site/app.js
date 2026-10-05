@@ -78,8 +78,11 @@ function renderServerProjects(projects) {
   const list = $('#server-projects');
   list.replaceChildren();
   for (const p of projects) {
-    const name = document.createElement('span');
+    // Same-page hash link: the session (tab memory only) survives, and Back
+    // returns to this list.
+    const name = document.createElement('a');
     name.className = 'project-name';
+    name.href = `#${session.login}/${p.key}`;
     name.textContent = p.name;
     const meta = document.createElement('span');
     meta.className = 'file-meta';

@@ -334,7 +334,12 @@ button.secondary {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  color: var(--accent); /* link color: on touch screens there is no hover hint */
+  font-weight: 500;
+  text-decoration: none;
 }
+#server-projects .project-name:hover,
+#server-projects .project-name:focus-visible { text-decoration: underline; }
 #server-projects .file-meta { flex-shrink: 0; }
 .project-actions {
   display: flex;
