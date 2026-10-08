@@ -33,6 +33,8 @@ aws s3 cp "$ROOT/site/app.js" "s3://$BUCKET/app.js" \
   --content-type "text/javascript; charset=utf-8" --cache-control "no-cache"
 aws s3 cp "$ROOT/site/lib.js" "s3://$BUCKET/lib.js" \
   --content-type "text/javascript; charset=utf-8" --cache-control "no-cache"
+aws s3 cp "$ROOT/site/cloud.js" "s3://$BUCKET/cloud.js" \
+  --content-type "text/javascript; charset=utf-8" --cache-control "no-cache"
 aws s3 cp "$ROOT/site/favicon.svg" "s3://$BUCKET/favicon.svg" \
   --content-type "image/svg+xml" --cache-control "max-age=86400"
 aws s3 cp "$ROOT/site/favicon.png" "s3://$BUCKET/favicon.png" \

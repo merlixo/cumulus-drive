@@ -4,6 +4,7 @@ import {
   buildZip, dedupeNames, safeContentType, uploadHeaders,
   formatDuration, isRetriableStatus, retryDelayMs, RETRY_DELAYS_MS,
 } from './lib.js';
+import { startCloud } from './cloud.js';
 
 const $ = (sel) => document.querySelector(sel);
 localStorage.removeItem('cumulus.projects'); // remnant of deleted "Visited Projects"
@@ -24,6 +25,34 @@ async function callAuthLambda(payload) {
   return { status: res.status, ok: res.ok, data };
 }
 
+// ---------- hero ----------
+
+const cloud = startCloud($('#hero-cloud'), $('#hero-art'));
+
+const HOME_HERO = {
+  eyebrow: 'Partage de photos',
+  title: 'Vos photos, dans un vrai nuage.',
+  sub: 'Un lien à partager, et tout le monde ajoute les siennes.',
+  size: 'tall',
+};
+
+// size: 'tall' on the login screen, 'compact' everywhere else.
+function setHero({ eyebrow = '', title, sub = '', size = 'compact' }) {
+  $('#hero').dataset.size = size;
+  $('#hero-eyebrow').textContent = eyebrow;
+  $('#hero-title').textContent = title;
+  $('#hero-sub').textContent = sub;
+}
+
+function accountHero(projectCount) {
+  return {
+    eyebrow: `Connecté : ${session.login}`,
+    title: 'Mes projets',
+    sub: projectCount === undefined ? '' : projectCount === 0 ? 'Aucun projet pour l’instant'
+      : `${projectCount} projet${projectCount > 1 ? 's' : ''}`,
+  };
+}
+
 // ---------- routing ----------
 
 function currentRef() {
@@ -36,6 +65,11 @@ function route() {
   $('#home-view').hidden = hasFragment;
   $('#project-view').hidden = !hasFragment;
   closeLightbox();
+  if (!hasFragment) {
+    $('#download-all').hidden = true; // lives in the hero, shared with the home view
+    document.title = 'Cumulus';
+    setHero(session ? accountHero(serverProjectCount) : HOME_HERO);
+  }
   if (hasFragment) {
     if (ref) showProject(ref);
     else showNotFound();
@@ -67,7 +101,6 @@ $('#login-form').addEventListener('submit', async (event) => {
     status.textContent = '';
     $('#login-hero').hidden = true;
     $('#account-section').hidden = false;
-    $('#account-title').textContent = `Connecté : ${login}`;
     renderServerProjects(data.projects);
   } catch (err) {
     status.textContent = `Erreur : ${err.message}`;
@@ -108,7 +141,11 @@ function renderServerProjects(projects) {
     list.append(li);
   }
   $('#server-projects-empty').hidden = projects.length > 0;
+  serverProjectCount = projects.length;
+  if (!location.hash.slice(1)) setHero(accountHero(projects.length));
 }
+
+let serverProjectCount; // undefined until the first listing
 
 async function refreshServerProjects() {
   const { ok, data } = await callAuthLambda({ action: 'list', ...session });
@@ -162,14 +199,14 @@ $('#copy-link').addEventListener('click', async () => {
 async function showProject(ref) {
   $('#not-found').hidden = true;
   $('#project-content').hidden = false;
-  $('#project-title').textContent = 'Chargement…';
+  setHero({ eyebrow: 'Projet partagé', title: 'Chargement…' });
   const res = await fetch(`/${encodeKeyPath(`projects/${ref.login}/${ref.key}/manifest.json`)}`, { cache: 'no-store' });
   if (!res.ok) {
     showNotFound();
     return;
   }
   const manifest = await res.json();
-  $('#project-title').textContent = manifest.name;
+  setHero({ eyebrow: 'Projet partagé', title: manifest.name });
   document.title = `${manifest.name} — Cumulus`;
   currentProjectName = manifest.name;
   await refreshFiles(ref);
@@ -178,7 +215,7 @@ async function showProject(ref) {
 function showNotFound() {
   $('#project-content').hidden = true;
   $('#not-found').hidden = false;
-  $('#project-title').textContent = 'Projet introuvable';
+  setHero({ eyebrow: 'Oups', title: 'Projet introuvable', sub: 'Vérifiez le lien qu’on vous a partagé.' });
 }
 
 let galleryKeys = []; // S3 keys of displayed media, in gallery order
@@ -228,6 +265,18 @@ function updateProjectSummary() {
   const allBtn = $('#download-all');
   allBtn.hidden = filesByKey.size === 0;
   allBtn.textContent = `Tout télécharger (${formatSize(totalSize)})`;
+  $('#hero-sub').textContent = projectStats([...filesByKey.keys()], totalSize);
+}
+
+// "12 photos · 2 vidéos · 1 fichier · 48 Mo" under the project title.
+function projectStats(keys, totalSize) {
+  if (keys.length === 0) return 'Aucun fichier pour l’instant';
+  const photos = keys.filter(isImage).length;
+  const videos = keys.filter(isVideo).length;
+  const others = keys.length - photos - videos;
+  const part = (n, word) => (n ? `${n} ${word}${n > 1 ? 's' : ''}` : null);
+  return [part(photos, 'photo'), part(videos, 'vidéo'), part(others, 'fichier'), formatSize(totalSize)]
+    .filter(Boolean).join(' · ');
 }
 
 // previewUrl: local thumbnail of a file just uploaded, so it does not flash
@@ -740,6 +789,7 @@ function updateUploadPanel() {
   panelFrame = 0;
   clearTimeout(panelHideTimer);
   const panel = $('#upload-panel');
+  cloud.setActive(uploads.some(isPending)); // hero cloud livens up while uploading
   if (uploads.length === 0) {
     panel.hidden = true;
     return;

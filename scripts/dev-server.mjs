@@ -27,7 +27,7 @@ const TYPES = {
   '.svg': 'image/svg+xml',
   '.png': 'image/png',
 };
-const SITE_FILES = new Set(['/index.html', '/style.css', '/app.js', '/lib.js', '/favicon.svg', '/favicon.png']);
+const SITE_FILES = new Set(['/index.html', '/style.css', '/app.js', '/lib.js', '/cloud.js', '/favicon.svg', '/favicon.png']);
 
 // Upload bandwidth cap (kbit/s), applied to PUT bodies only.
 function throttle() {

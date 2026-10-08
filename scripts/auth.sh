@@ -51,7 +51,7 @@ import json, sys
 bucket, registry = sys.argv[1], sys.argv[2]
 logins = sorted(json.load(open(registry)))
 arn = f"arn:aws:s3:::{bucket}"
-site_files = ["index.html", "style.css", "app.js", "lib.js", "config.js",
+site_files = ["index.html", "style.css", "app.js", "lib.js", "cloud.js", "config.js",
               "favicon.svg", "favicon.png"]
 qq = "?" * 16  # = KEY_LENGTH in site/lib.js — keep synchronized
 statements = [{

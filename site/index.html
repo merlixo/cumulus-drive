@@ -26,15 +26,26 @@
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
-  <header>
-    <a class="brand" href="index.html"><img src="favicon.svg" alt="" width="24" height="24"> Cumulus</a>
+  <header id="hero" class="hero" data-size="tall">
+    <canvas id="hero-cloud" aria-hidden="true"></canvas>
+    <div class="hero-inner">
+      <a class="brand" href="index.html"><img src="favicon.svg" alt="" width="30" height="30"> Cumulus</a>
+      <div id="hero-art" class="hero-art" aria-hidden="true"></div>
+      <div class="hero-text">
+        <p id="hero-eyebrow" class="hero-eyebrow">Partage de photos</p>
+        <h1 id="hero-title">Vos photos, dans un vrai nuage.</h1>
+        <p id="hero-sub" class="hero-sub">Un lien à partager, et tout le monde ajoute les siennes.</p>
+        <div class="hero-actions">
+          <button id="download-all" type="button" class="glass" hidden>Tout télécharger</button>
+        </div>
+      </div>
+    </div>
   </header>
   <main>
     <section id="home-view" hidden>
       <div id="login-hero">
         <div class="login-card">
-          <div class="login-brand" aria-hidden="true">⛅</div>
-          <h1>Partagez vos photos !</h1>
+          <h2>Connexion</h2>
           <form id="login-form">
             <label class="sr-only" for="account-login">Login</label>
             <input id="account-login" required autocomplete="username" pattern="[a-z0-9]{2,16}"
@@ -49,7 +60,6 @@
       </div>
 
       <section id="account-section" hidden>
-        <h2 id="account-title"></h2>
         <form id="create-form" class="home-card">
           <h3>Créer un projet</h3>
           <label for="project-name">Nom du projet</label>
@@ -73,12 +83,10 @@
     </section>
 
     <section id="project-view" hidden>
-      <h1 id="project-title"></h1>
       <div id="not-found" hidden>
         <p>Projet introuvable. Vérifiez le lien qu'on vous a partagé.</p>
       </div>
       <div id="project-content">
-        <button id="download-all" type="button" class="secondary" hidden>Tout télécharger</button>
         <div id="dropzone">
           <p>Glissez vos fichiers ici, ou</p>
           <div class="picker-buttons">
