@@ -10,8 +10,9 @@ const KEY = 'a'.repeat(16);
 function makeDeps(overrides = {}) {
   return {
     loadAccounts: async () => ({ ...ACCOUNTS }),
-    headManifest: async () => true,
+    getManifest: async () => ({ name: 'X', createdAt: '2026-01-01T00:00:00Z' }),
     putManifest: async () => {},
+    writeManifest: async () => {},
     presignPut: async (objectKey) => `https://signed.example/${objectKey}`,
     listObjectsUnder: async () => [],
     getObjectText: async () => '{}',
@@ -73,7 +74,7 @@ test('create: empty or overlong name → 400', async () => {
 test('sign: without password (capability = link); missing manifest → 403', async () => {
   const seen = [];
   const handle = createHandler(makeDeps({
-    headManifest: async (login, key) => { seen.push(`${login}/${key}`); return false; },
+    getManifest: async (login, key) => { seen.push(`${login}/${key}`); return null; },
   }));
   const res = await handle(post({
     action: 'sign', login: 'alice', key: KEY, objects: [{ path: 'files/1-a.jpg', type: 'x', size: 100 }],
@@ -130,7 +131,7 @@ test('sign: signs a normalized Content-Type and disposition, never the one suppl
 test('sign: invalid key → 400 without querying S3; invalid paths, empty or > 50 → 400', async () => {
   let headCalled = false;
   const handle = createHandler(makeDeps({
-    headManifest: async () => { headCalled = true; return true; },
+    getManifest: async () => { headCalled = true; return { name: 'X' }; },
   }));
   assert.equal((await handle(post({
     action: 'sign', login: 'alice', key: 'courte', objects: [{ path: 'files/1-a.jpg', type: 'x', size: 100 }],
@@ -153,7 +154,7 @@ test('GET method, invalid JSON, unknown action → 400', async () => {
 });
 
 test('base64 encoded body accepted (Function URL)', async () => {
-  const handle = createHandler(makeDeps({ headManifest: async () => false }));
+  const handle = createHandler(makeDeps({ getManifest: async () => null }));
   const payload = { action: 'sign', login: 'alice', key: KEY, objects: [{ path: 'files/1-a.jpg', type: 'x', size: 100 }] };
   const res = await handle({
     requestContext: { http: { method: 'POST' } },
@@ -194,6 +195,16 @@ test('list: manifests for login only, descending sort, corrupted manifest → ke
   const { projects } = JSON.parse(res.body);
   assert.deepEqual(projects.map((p) => p.name), ['Récent', 'Ancien', K3]);
   assert.deepEqual(projects.map((p) => p.key), [K2, K1, K3]);
+  assert.deepEqual(projects.map((p) => p.readOnly), [false, false, false]);
+});
+
+test('list: readOnly exposed from the manifest', async () => {
+  const handle = createHandler(makeDeps({
+    listObjectsUnder: async () => [{ key: `projects/alice/${KEY}/manifest.json`, size: 70 }],
+    getObjectText: async () => JSON.stringify({ name: 'Figé', createdAt: '2026-01-01T00:00:00Z', readOnly: true }),
+  }));
+  const { projects } = JSON.parse((await handle(post({ action: 'list', login: 'alice', password: 'sésame' }))).body);
+  assert.equal(projects[0].readOnly, true);
 });
 
 test('delete: batches of 1000, total returned, idempotent when empty', async () => {
@@ -326,7 +337,7 @@ test('sign: sizes signed since the last measurement count toward the bucket quot
 test('sign: unknown project never lists the bucket', async () => {
   let listed = false;
   const handle = createHandler(makeDeps({
-    headManifest: async () => false,
+    getManifest: async () => null,
     listObjectsUnder: async () => { listed = true; return []; },
   }));
   const res = await handle(post({
@@ -334,4 +345,57 @@ test('sign: unknown project never lists the bucket', async () => {
   }));
   assert.equal(res.statusCode, 403);
   assert.equal(listed, false);
+});
+
+test('sign: read-only project → 403, never lists nor signs', async () => {
+  let touched = false;
+  const handle = createHandler(makeDeps({
+    getManifest: async () => ({ name: 'Figé', readOnly: true }),
+    listObjectsUnder: async () => { touched = true; return []; },
+    presignPut: async () => { touched = true; return 'x'; },
+  }));
+  const res = await handle(post({
+    action: 'sign', login: 'alice', key: KEY, objects: [{ path: 'thumbs/1-a.jpg.jpg', type: 'image/jpeg', size: 10 }],
+  }));
+  assert.equal(res.statusCode, 403);
+  assert.match(JSON.parse(res.body).error, /lecture seule/);
+  assert.equal(touched, false);
+});
+
+test('setReadOnly: bad credentials → 401, nothing written; invalid key or flag → 400; unknown project → 404', async () => {
+  const writes = [];
+  const handle = createHandler(makeDeps({ writeManifest: async (...args) => writes.push(args) }));
+  const base = { action: 'setReadOnly', login: 'alice', password: 'sésame', key: KEY, readOnly: true };
+  assert.equal((await handle(post({ ...base, password: 'faux' }))).statusCode, 401);
+  assert.equal((await handle(post({ ...base, login: 'zorro' }))).statusCode, 401);
+  assert.equal((await handle(post({ ...base, key: 'courte' }))).statusCode, 400);
+  assert.equal((await handle(post({ ...base, readOnly: 'oui' }))).statusCode, 400);
+  const missing = createHandler(makeDeps({
+    getManifest: async () => null,
+    writeManifest: async (...args) => writes.push(args),
+  }));
+  assert.equal((await missing(post(base))).statusCode, 404);
+  assert.equal(writes.length, 0);
+});
+
+test('setReadOnly: rewrites the manifest keeping name and createdAt, reversible', async () => {
+  let stored = { name: 'Vacances', createdAt: '2026-07-01T00:00:00Z' };
+  const handle = createHandler(makeDeps({
+    getManifest: async (login, key) => {
+      assert.deepEqual([login, key], ['alice', KEY]);
+      return stored;
+    },
+    writeManifest: async (login, key, body) => {
+      assert.deepEqual([login, key], ['alice', KEY]);
+      stored = JSON.parse(body);
+    },
+  }));
+  const base = { action: 'setReadOnly', login: 'alice', password: 'sésame', key: KEY };
+  const res = await handle(post({ ...base, readOnly: true }));
+  assert.equal(res.statusCode, 200);
+  assert.deepEqual(JSON.parse(res.body), { readOnly: true });
+  assert.deepEqual(stored, { name: 'Vacances', createdAt: '2026-07-01T00:00:00Z', readOnly: true });
+  await handle(post({ ...base, readOnly: false }));
+  assert.equal(stored.readOnly, false);
+  assert.equal(stored.name, 'Vacances');
 });

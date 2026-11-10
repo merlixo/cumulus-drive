@@ -462,6 +462,74 @@ button.secondary {
 }
 .project-actions button { white-space: nowrap; }
 
+/* Project row actions: icon buttons with a hover/focus bubble (data-tip). */
+.project-actions { gap: 0.4rem; align-items: center; }
+button.icon-button {
+  position: relative;
+  width: 40px;
+  height: 40px;
+  padding: 0;
+  display: grid;
+  place-items: center;
+  background: var(--card);
+  color: var(--muted);
+  border: 1px solid var(--border);
+  transition: color .15s ease, background-color .15s ease, border-color .15s ease;
+}
+button.icon-button:hover:not(:disabled) { color: var(--text); border-color: #cfd5de; filter: none; }
+button.icon-button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+button.icon-button.danger:hover:not(:disabled) {
+  color: var(--danger);
+  border-color: color-mix(in srgb, var(--danger) 40%, white);
+}
+button.icon-button.locked {
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 9%, white);
+  border-color: color-mix(in srgb, var(--accent) 45%, white);
+}
+button.icon-button.locked:hover:not(:disabled) { color: var(--accent); border-color: var(--accent); }
+button.icon-button[aria-busy="true"] { cursor: progress; }
+.icon-button svg {
+  width: 20px;
+  height: 20px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.icon-button .keyhole { fill: currentColor; stroke: none; }
+/* Open padlock: the shackle lifts and tilts around its left leg. */
+.icon-button .shackle {
+  transform-box: view-box;
+  transform-origin: 8px 11px;
+  transform: translateY(-2px) rotate(-16deg);
+  transition: transform .28s cubic-bezier(.3, 1.5, .5, 1);
+}
+.icon-button.locked .shackle { transform: none; }
+.icon-button::after {
+  content: attr(data-tip);
+  position: absolute;
+  bottom: calc(100% + 8px);
+  right: 0;
+  white-space: nowrap;
+  background: var(--text);
+  color: #fff;
+  font-size: .75rem;
+  font-weight: 500;
+  padding: 5px 9px;
+  border-radius: 7px;
+  opacity: 0;
+  transform: translateY(3px);
+  pointer-events: none;
+  transition: opacity .12s ease, transform .12s ease;
+  z-index: 2;
+}
+.icon-button:hover::after, .icon-button:focus-visible::after { opacity: 1; transform: none; }
+@media (prefers-reduced-motion: reduce) {
+  .icon-button .shackle, .icon-button::after { transition: none; }
+}
+
 /* Login screen: card overlapping the tall hero. */
 #login-hero {
   display: flex;

@@ -120,22 +120,22 @@ function renderServerProjects(projects) {
     const meta = document.createElement('span');
     meta.className = 'file-meta';
     meta.textContent = p.createdAt ? new Date(p.createdAt).toLocaleDateString('fr-FR') : '';
-    const copy = document.createElement('button');
-    copy.type = 'button';
-    copy.textContent = 'Copier le lien';
+    const copy = iconButton('link', 'Copier le lien', `Copier le lien de « ${p.name} »`);
     copy.addEventListener('click', async () => {
       await navigator.clipboard.writeText(buildShareLink(location.href, `${session.login}/${p.key}`));
-      copy.textContent = 'Copié !';
-      setTimeout(() => { copy.textContent = 'Copier le lien'; }, 1500);
+      copy.dataset.tip = 'Lien copié';
+      setTimeout(() => { copy.dataset.tip = 'Copier le lien'; }, 1500);
     });
-    const del = document.createElement('button');
-    del.type = 'button';
-    del.className = 'secondary';
-    del.textContent = 'Supprimer';
+    // The padlock shows the state: open = uploads allowed, closed = read-only.
+    const lock = iconButton('lock', '', `Verrouiller « ${p.name} »`);
+    syncLock(lock, p.readOnly);
+    lock.addEventListener('click', () => toggleReadOnly(p, lock));
+    const del = iconButton('trash', 'Supprimer', `Supprimer « ${p.name} »`);
+    del.classList.add('danger');
     del.addEventListener('click', () => deleteServerProject(p, del));
     const actions = document.createElement('div');
     actions.className = 'project-actions';
-    actions.append(copy, del);
+    actions.append(copy, lock, del);
     const li = document.createElement('li');
     li.append(name, meta, actions);
     list.append(li);
@@ -162,6 +162,51 @@ async function deleteServerProject(project, button) {
   } catch (err) {
     alert(`Suppression impossible : ${err.message}`);
     button.disabled = false;
+  }
+}
+
+// Hand-drawn 24×24 stroke icons (no icon font or image: the CSP only allows 'self').
+const ICONS = {
+  lock: '<rect x="5" y="11" width="14" height="10" rx="2"/>'
+    + '<path class="shackle" d="M8 11V7a4 4 0 0 1 8 0v4"/><circle class="keyhole" cx="12" cy="16" r="1.3"/>',
+  link: '<path d="M10 14a4 4 0 0 0 5.66 0l3-3a4 4 0 0 0-5.66-5.66l-1 1"/>'
+    + '<path d="M14 10a4 4 0 0 0-5.66 0l-3 3a4 4 0 0 0 5.66 5.66l1-1"/>',
+  trash: '<path d="M4 7h16"/><path d="M9 7V4.5h6V7"/><path d="M6.5 7l.9 12.5h9.2L17.5 7"/>'
+    + '<path d="M10 11v5.5"/><path d="M14 11v5.5"/>',
+};
+
+// tip: hover/focus bubble (data-tip); label: what screen readers announce.
+function iconButton(name, tip, label) {
+  const button = document.createElement('button');
+  button.type = 'button';
+  button.className = 'icon-button';
+  button.innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true">${ICONS[name]}</svg>`;
+  button.dataset.tip = tip;
+  button.setAttribute('aria-label', label);
+  return button;
+}
+
+function syncLock(button, readOnly) {
+  button.classList.toggle('locked', readOnly);
+  button.setAttribute('aria-pressed', String(readOnly));
+  button.dataset.tip = readOnly ? 'Projet verrouillé · cliquer pour rouvrir' : 'Ajouts ouverts · cliquer pour verrouiller';
+}
+
+// Optimistic: the padlock animates on click and is put back if the Lambda refuses.
+async function toggleReadOnly(project, button) {
+  if (button.getAttribute('aria-busy') === 'true') return;
+  const readOnly = !project.readOnly;
+  button.setAttribute('aria-busy', 'true');
+  syncLock(button, readOnly);
+  try {
+    const { ok, data } = await callAuthLambda({ action: 'setReadOnly', ...session, key: project.key, readOnly });
+    if (!ok) throw new Error(data.error ?? 'échec');
+    project.readOnly = readOnly;
+  } catch (err) {
+    syncLock(button, project.readOnly);
+    alert(`Modification impossible : ${err.message}`);
+  } finally {
+    button.removeAttribute('aria-busy');
   }
 }
 
@@ -206,10 +251,22 @@ async function showProject(ref) {
     return;
   }
   const manifest = await res.json();
-  setHero({ eyebrow: 'Projet partagé', title: manifest.name });
+  setReadOnlyView(manifest.readOnly === true);
+  // The sub line is taken by the file stats (updateProjectSummary).
+  setHero({ eyebrow: projectReadOnly ? 'Projet en lecture seule' : 'Projet partagé', title: manifest.name });
   document.title = `${manifest.name} — Cumulus`;
   currentProjectName = manifest.name;
   await refreshFiles(ref);
+}
+
+// Upload controls are only hidden here: the Lambda is what refuses to sign.
+let projectReadOnly = false;
+function setReadOnlyView(readOnly) {
+  projectReadOnly = readOnly;
+  $('#dropzone').hidden = readOnly;
+  $('#empty-state').textContent = readOnly
+    ? 'Aucun fichier dans ce projet.'
+    : 'Aucun fichier pour l’instant. Soyez le premier à en ajouter !';
 }
 
 function showNotFound() {
@@ -406,7 +463,7 @@ function uniqueStamp() {
 
 function uploadFiles(files) {
   const ref = currentRef();
-  if (!ref || files.length === 0) return;
+  if (!ref || files.length === 0 || projectReadOnly) return;
   // New batch after the previous one settled: its successes leave the counters.
   if (!uploads.some(isPending)) {
     for (let i = uploads.length - 1; i >= 0; i -= 1) if (uploads[i].state === 'done') uploads.splice(i, 1);
@@ -615,7 +672,7 @@ async function signBatch(ref, batch) {
       throw new UploadError(err instanceof TypeError ? 'connexion perdue' : err.message,
         { retriable: err instanceof TypeError });
     }
-    if (res.status === 403) throw new UploadError('projet introuvable');
+    if (res.status === 403) throw new UploadError(res.data.error ?? 'projet introuvable');
     if (!res.ok) {
       throw new UploadError(res.data.error ?? `HTTP ${res.status}`, { retriable: isRetriableStatus(res.status) });
     }
@@ -950,7 +1007,7 @@ function backfillVideoThumb(key, img) {
       const thumbPath = `thumbs/${key.split('/').pop()}.jpg`;
       try {
         const ref = currentRef();
-        if (ref) {
+        if (ref && !projectReadOnly) {
           const { ok, data } = await callAuthLambda({
             action: 'sign',
             login: ref.login,

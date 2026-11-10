@@ -41,7 +41,8 @@ async function accountMatches(login, password, deps) {
   return hashMatches(password, expected);
 }
 
-// deps : { loadAccounts, headManifest(login, key), putManifest(login, key, body),
+// deps : { loadAccounts, getManifest(login, key) → object | null,
+//          putManifest(login, key, body) (create only), writeManifest(login, key, body) (overwrite),
 //          presignPut(objectKey, contentType, contentLength),
 //          listObjectsUnder(prefix) → [{key, size}],
 //          getObjectText(objectKey), deleteObjects(objectKeys) }
@@ -80,6 +81,7 @@ export function createHandler(deps, { now = Date.now } = {}) {
     if (body.action === 'sign') return sign(body, signDeps);
     if (body.action === 'list') return list(body, deps);
     if (body.action === 'delete') return destroy(body, deps);
+    if (body.action === 'setReadOnly') return setReadOnly(body, deps);
     return json(400, { error: 'action inconnue' });
   };
 }
@@ -108,9 +110,10 @@ async function sign({ login, key, objects }, deps) {
       return json(400, { error: 'objets invalides' });
     }
   }
-  if (!(await deps.headManifest(login, key))) {
-    return json(403, { error: 'projet introuvable' });
-  }
+  const manifest = await deps.getManifest(login, key);
+  if (!manifest) return json(403, { error: 'projet introuvable' });
+  // Checked before any listing: a frozen project costs nothing to refuse.
+  if (manifest.readOnly === true) return json(403, { error: 'projet en lecture seule' });
   // Storage safety limits: the project is measured exactly on every call (its
   // own prefix only), the bucket total comes from the per-instance cache.
   // Declared sizes are tamper-proof: they are signed in the URLs
@@ -156,12 +159,14 @@ async function list({ login, password }, deps) {
     const key = match[1];
     let name = key;
     let createdAt = '';
+    let readOnly = false;
     try {
       const manifest = JSON.parse(await deps.getObjectText(objectKey));
       if (typeof manifest.name === 'string' && manifest.name) name = manifest.name;
       if (typeof manifest.createdAt === 'string') createdAt = manifest.createdAt;
+      readOnly = manifest.readOnly === true;
     } catch { /* unreadable manifest: key used as name */ }
-    projects.push({ key, name, createdAt });
+    projects.push({ key, name, createdAt, readOnly });
   }
   projects.sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1));
   return json(200, { projects });
@@ -178,4 +183,18 @@ async function destroy({ login, password, key }, deps) {
     await deps.deleteObjects(objectKeys.slice(i, i + DELETE_BATCH));
   }
   return json(200, { deleted: objectKeys.length });
+}
+
+// Owner only: freezes (or reopens) a project. Visitors keep viewing and
+// downloading; sign refuses new uploads while readOnly is true.
+async function setReadOnly({ login, password, key, readOnly }, deps) {
+  if (!(await accountMatches(login, password, deps))) {
+    return json(401, { error: 'identifiants incorrects' });
+  }
+  if (!isValidKey(key)) return json(400, { error: 'clé invalide' });
+  if (typeof readOnly !== 'boolean') return json(400, { error: 'readOnly invalide' });
+  const manifest = await deps.getManifest(login, key);
+  if (!manifest) return json(404, { error: 'projet introuvable' });
+  await deps.writeManifest(login, key, JSON.stringify({ ...manifest, readOnly }));
+  return json(200, { readOnly });
 }

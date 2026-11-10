@@ -1,7 +1,7 @@
 // Lambda entry point: wires pure handler to AWS SDK v3
 // (provided by nodejs22.x runtime, never imported by local tests).
 import {
-  S3Client, PutObjectCommand, HeadObjectCommand, GetObjectCommand,
+  S3Client, PutObjectCommand, GetObjectCommand,
   ListObjectsV2Command, DeleteObjectsCommand,
 } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
@@ -38,14 +38,15 @@ export const handler = createHandler({
     return JSON.parse(raw); // corrupted registry → error propagated (502)
   },
 
-  async headManifest(login, key) {
+  async getManifest(login, key) {
+    let raw;
     try {
-      await s3.send(new HeadObjectCommand({ Bucket: BUCKET, Key: manifestKey(login, key) }));
-      return true;
+      raw = await readText(manifestKey(login, key));
     } catch (err) {
-      if (isAbsence(err)) return false;
+      if (isAbsence(err)) return null;
       throw err;
     }
+    return JSON.parse(raw);
   },
 
   async putManifest(login, key, body) {
@@ -55,6 +56,16 @@ export const handler = createHandler({
       Body: body,
       ContentType: 'application/json',
       IfNoneMatch: '*',
+    }));
+  },
+
+  // Overwrites an existing manifest (readOnly toggle); create uses putManifest.
+  async writeManifest(login, key, body) {
+    await s3.send(new PutObjectCommand({
+      Bucket: BUCKET,
+      Key: manifestKey(login, key),
+      Body: body,
+      ContentType: 'application/json',
     }));
   },
 
